@@ -9,9 +9,8 @@ import torch
 from CONVERTER import SpirePPOAgent, build_bridge_payload, vectorize_gamestate
 from Train import (
     TrainerConfig,
-    PPOTrainer,
     SharedPolicy,
-    choose_automatic_action,
+    automatic_action,
     load_checkpoint,
     save_checkpoint,
 )
@@ -65,32 +64,35 @@ class RootAgentTests(unittest.TestCase):
             {"action_id": "continue", "type": "continue_run", "params": {}},
             {"action_id": "new", "type": "start_new_run", "params": {}},
         ]
-        self.assertEqual(choose_automatic_action(menu, actions)["type"], "start_new_run")
+        self.assertEqual(automatic_action(menu, actions)["type"], "start_new_run")
 
         setup = {"phase": "menu", "metadata": {"window_kind": "new_run_setup"}}
         setup_actions = [
             {"action_id": "start", "type": "confirm_start_run", "params": {}}
         ]
         self.assertEqual(
-            choose_automatic_action(setup, setup_actions)["type"], "confirm_start_run"
+            automatic_action(setup, setup_actions)["type"], "confirm_start_run"
         )
 
     def test_checkpoint_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "checkpoint.pt"
-            config = TrainerConfig(checkpoint=path, minibatch_size=2)
+            config = TrainerConfig(checkpoint=path)
             model = SpirePPOAgent()
-            shared = SharedPolicy(model, torch.device("cpu"))
-            trainer = PPOTrainer(shared, config)
-            save_checkpoint(trainer, path)
+            policy = SharedPolicy(model, torch.device("cpu"))
+            optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+            save_checkpoint(policy, optimizer, config, updates=2, steps=11, episodes=3)
 
-            restored = SpirePPOAgent()
-            optimizer = torch.optim.Adam(restored.parameters(), lr=config.learning_rate)
-            updates, steps, episodes = load_checkpoint(
-                restored, optimizer, path, torch.device("cpu")
+            restored_model = SpirePPOAgent()
+            restored_policy = SharedPolicy(restored_model, torch.device("cpu"))
+            restored_optimizer = torch.optim.Adam(
+                restored_model.parameters(), lr=config.learning_rate
             )
-            self.assertEqual((updates, steps, episodes), (0, 0, 0))
-            for expected, actual in zip(model.parameters(), restored.parameters()):
+            updates, steps, episodes = load_checkpoint(
+                restored_policy, restored_optimizer, path
+            )
+            self.assertEqual((updates, steps, episodes), (2, 11, 3))
+            for expected, actual in zip(model.parameters(), restored_model.parameters()):
                 self.assertTrue(torch.equal(expected, actual))
 
 
