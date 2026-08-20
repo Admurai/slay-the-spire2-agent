@@ -11,11 +11,14 @@
 - `mod/Sts2Mod.StateBridge.Host/`：fixture / runtime-host 联调宿主
 - `tests/`：Python 单元测试
 - `tools/`：构建、安装、验证、live 调试脚本
+- `CONVERTER.py`：固定大小状态编码、action mask、PPO 模型和 bridge payload 映射
+- `Train.py`：支持自动重启的 PPO 训练器，每个 bridge endpoint 对应一个 worker
 - `docs/`：详细开发文档、兼容性说明与升级注意事项
 
 ## 环境要求
 
 - Python 3.11+
+- PyTorch 和 Requests
 - .NET SDK 9
 - Godot 4.5.1
 - Windows 版《Slay the Spire 2》
@@ -42,6 +45,49 @@ python tools/debug_sts2_mod.py debug --game-dir "F:\\SteamLibrary\\steamapps\\co
 ```bash
 $env:PYTHONPATH='src'; python -m unittest discover -s tests -v
 ```
+
+## 神经网络训练器
+
+`Train.py` 现在执行真正的 on-policy PPO 更新，而不只是 inference-only autoplay。它会：
+
+- 在 run 进入 terminal 后，从 bridge 菜单自动选择新 run；
+- 在 policy 尚未覆盖的 reward/map/event/shop 阶段使用安全默认动作；
+- 为每个 bridge worker 收集 rollout，并在锁保护下更新共享 policy；
+- 原子保存模型和 optimizer 状态，支持中断后 resume；
+- 遇到 stale decision 或 bridge 暂时不可用时继续等待，而不是直接崩溃。
+
+单个游戏实例：
+
+```bash
+python Train.py --base-url http://127.0.0.1:17654 --checkpoint checkpoints/ppo_spire_model.pt
+```
+
+从 checkpoint 继续训练：
+
+```bash
+python Train.py \
+  --base-url http://127.0.0.1:17654 \
+  --resume checkpoints/ppo_spire_model.pt \
+  --checkpoint checkpoints/ppo_spire_model.pt
+```
+
+并行训练需要 **每个运行中的游戏/bridge 实例使用一个独立 endpoint**。Python trainer 不会自动复制 Steam 进程，也不能让多个 worker 共用一个端口：
+
+```bash
+python Train.py \
+  --base-url http://127.0.0.1:17654 \
+  --base-url http://127.0.0.1:17655 \
+  --base-url http://127.0.0.1:17656 \
+  --checkpoint checkpoints/ppo_spire_model.pt
+```
+
+如果端口连续，也可以使用缩写：
+
+```bash
+python Train.py --workers 3 --port-start 17654
+```
+
+不要让多个 worker 指向同一个端口，否则它们会同时控制同一个游戏，破坏 decision/rollout 序列。
 
 ## Bridge 接口
 
