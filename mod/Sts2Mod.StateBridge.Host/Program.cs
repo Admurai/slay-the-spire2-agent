@@ -35,18 +35,44 @@ static BridgeOptions ParseArgs(string[] args)
         values[key[2..]] = args[index + 1];
     }
 
+    var host = values.GetValueOrDefault("host")
+        ?? Environment.GetEnvironmentVariable("STS2_BRIDGE_HOST")
+        ?? "127.0.0.1";
+    var portText = values.GetValueOrDefault("port")
+        ?? Environment.GetEnvironmentVariable("STS2_BRIDGE_PORT");
+    var writesText = values.GetValueOrDefault("enable-writes")
+        ?? Environment.GetEnvironmentVariable("STS2_BRIDGE_ENABLE_WRITES");
+    var readOnlyText = values.GetValueOrDefault("read-only");
+
     return new BridgeOptions
     {
-        Host = values.GetValueOrDefault("host") ?? "127.0.0.1",
-        Port = int.TryParse(values.GetValueOrDefault("port"), out var port) ? port : 17654,
+        Host = host,
+        Port = int.TryParse(portText, out var port) ? port : 17654,
         ProtocolVersion = values.GetValueOrDefault("protocol-version") ?? "0.1.0",
         ModVersion = values.GetValueOrDefault("mod-version") ?? "0.1.0",
         GameVersion = values.GetValueOrDefault("game-version") ?? "prototype",
         ProviderMode = values.GetValueOrDefault("provider-mode") ?? "fixture",
         Sts2ManagedDir = values.GetValueOrDefault("sts2-managed-dir"),
         Sts2ModLoaderDir = values.GetValueOrDefault("sts2-modloader-dir"),
-        PreferRuntimeProvider = string.Equals(values.GetValueOrDefault("prefer-runtime-provider"), "true", StringComparison.OrdinalIgnoreCase),
+        PreferRuntimeProvider = ParseBool(values.GetValueOrDefault("prefer-runtime-provider"), false),
         AllowDebugPhaseOverride = !string.Equals(values.GetValueOrDefault("allow-debug-phase-override"), "false", StringComparison.OrdinalIgnoreCase),
-        ReadOnly = !string.Equals(values.GetValueOrDefault("read-only"), "false", StringComparison.OrdinalIgnoreCase),
+        ReadOnly = readOnlyText is not null
+            ? !ParseBool(readOnlyText, false)
+            : !ParseBool(writesText, false),
+    };
+}
+
+static bool ParseBool(string? value, bool defaultValue)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return defaultValue;
+    }
+
+    return value.Trim().ToLowerInvariant() switch
+    {
+        "1" or "true" or "yes" or "on" => true,
+        "0" or "false" or "no" or "off" => false,
+        _ => defaultValue,
     };
 }
